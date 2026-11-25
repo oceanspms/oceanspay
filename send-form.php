@@ -2,60 +2,29 @@
 declare(strict_types=1);
 
 /*
- * OCEAN ACROSS — UNIVERSAL SMTP FORM HANDLER
+ * OCEAN ACROSS — BREVO HTTPS API FORM HANDLER
  *
- * Upload as: public_html/send-form.php
- * Every HTML form can use this same file:
- *   <form action="/send-form.php" method="post">
- *
- * REQUIREMENT: PHP 8+ with OpenSSL enabled.
+ * Recommended when SMTP ports are blocked or SMTP IP restrictions are unclear.
+ * Upload as: the same directory as contact.html
+ * Requirement: PHP 8+ and either cURL or allow_url_fopen.
  */
 
 // --------------------------------------------------------------------------
-// 1. ENTER YOUR SMTP DETAILS HERE
+// 1. CONFIGURATION — PASTE A BREVO API KEY, NOT THE SMTP KEY
 // --------------------------------------------------------------------------
-$smtpHost     = 'smtp-relay.brevo.com'; // Replace if your SMTP provider differs.
-$smtpPort     = 587;                     // Usually 587 for TLS or 465 for SSL.
-$smtpSecurity = 'tls';                   // tls, ssl or none
-$smtpUsername = 'PASTE_SMTP_USERNAME_HERE';
-$smtpPassword = 'PASTE_SMTP_PASSWORD_HERE';
+$brevoApiKey = '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';
 
-$fromEmail = 'info@ocean-across.com';
+// This sender is already proven in your Brevo/GMass test.
+$fromEmail = 'info@oceanspay.co.uk';
 $fromName  = 'Ocean Across Website';
-$toEmail   = 'info@ocean-across.com';
-$toName    = 'Ocean Across';
+
+// All website leads arrive here.
+$toEmail = 'palkesh@oceanspay.co.uk';
+$toName  = 'Ocean Across';
 
 // --------------------------------------------------------------------------
-// 2. INTERNAL FUNCTIONS — NO CHANGES NEEDED BELOW THIS LINE
+// 2. INTERNAL FUNCTIONS
 // --------------------------------------------------------------------------
-
-function smtpRead($socket): string
-{
-    $response = '';
-    while (($line = fgets($socket, 515)) !== false) {
-        $response .= $line;
-        if (strlen($line) >= 4 && $line[3] === ' ') break;
-    }
-    return $response;
-}
-
-function smtpExpect($socket, array $allowedCodes): string
-{
-    $response = smtpRead($socket);
-    $code = (int)substr($response, 0, 3);
-    if (!in_array($code, $allowedCodes, true)) {
-        throw new RuntimeException('SMTP rejected the request with code ' . $code);
-    }
-    return $response;
-}
-
-function smtpCommand($socket, string $command, array $allowedCodes): string
-{
-    if (fwrite($socket, $command . "\r\n") === false) {
-        throw new RuntimeException('Could not write to SMTP server');
-    }
-    return smtpExpect($socket, $allowedCodes);
-}
 
 function cleanHeader(string $value, int $limit = 200): string
 {
@@ -84,125 +53,67 @@ function displayLabel(string $key): string
     return ucwords(trim($key));
 }
 
-function safeReturnPath(string $path): string
+function finishRequest(bool $success): void
 {
-    $path = trim($path);
-    if ($path === '' || $path[0] !== '/' || str_starts_with($path, '//')) return '/';
-    $parts = parse_url($path);
-    if ($parts === false || isset($parts['scheme']) || isset($parts['host'])) return '/';
-    return $path;
-}
-
-function finishRequest(bool $success, string $returnPath): void
-{
-    $fragment = '';
-    $hashPosition = strpos($returnPath, '#');
-    if ($hashPosition !== false) {
-        $fragment = substr($returnPath, $hashPosition);
-        $returnPath = substr($returnPath, 0, $hashPosition);
-    }
-    $separator = str_contains($returnPath, '?') ? '&' : '?';
-    header('Location: ' . $returnPath . $separator . 'lead=' . ($success ? 'sent' : 'error') . $fragment, true, 303);
+    header('Location: contact.html?lead=' . ($success ? 'sent' : 'error') . '#demo-form', true, 303);
     exit;
 }
 
-function formatAddress(string $name, string $email): string
+function sendBrevoRequest(string $apiKey, array $payload): array
 {
-    $name = cleanHeader($name);
-    return $name !== '' ? '"' . addcslashes($name, '"\\') . '" <' . $email . '>' : '<' . $email . '>';
-}
+    $url = 'https://api.brevo.com/v3/smtp/email';
+    $json = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+    $headers = [
+        'accept: application/json',
+        'api-key: ' . $apiKey,
+        'content-type: application/json',
+    ];
 
-function sendUsingSmtp(
-    string $host,
-    int $port,
-    string $security,
-    string $username,
-    string $password,
-    string $fromEmail,
-    string $fromName,
-    string $toEmail,
-    string $toName,
-    string $replyEmail,
-    string $replyName,
-    string $subject,
-    string $body
-): void {
-    $security = strtolower($security);
-    if (!in_array($security, ['tls', 'ssl', 'none'], true)) {
-        throw new RuntimeException('Invalid SMTP security setting');
+    if (function_exists('curl_init')) {
+        $curl = curl_init($url);
+        if ($curl === false) throw new RuntimeException('Could not initialise HTTPS request');
+        curl_setopt_array($curl, [
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => $json,
+            CURLOPT_HTTPHEADER => $headers,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => 15,
+            CURLOPT_TIMEOUT => 30,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
+        ]);
+        $body = curl_exec($curl);
+        $status = (int)curl_getinfo($curl, CURLINFO_HTTP_CODE);
+        $error = curl_error($curl);
+        curl_close($curl);
+        if ($body === false) throw new RuntimeException('Brevo HTTPS connection failed: ' . $error);
+        return [$status, (string)$body];
+    }
+
+    if (!filter_var((string)ini_get('allow_url_fopen'), FILTER_VALIDATE_BOOLEAN)) {
+        throw new RuntimeException('Neither cURL nor allow_url_fopen is available');
     }
 
     $context = stream_context_create([
+        'http' => [
+            'method' => 'POST',
+            'header' => implode("\r\n", $headers),
+            'content' => $json,
+            'ignore_errors' => true,
+            'timeout' => 30,
+        ],
         'ssl' => [
             'verify_peer' => true,
             'verify_peer_name' => true,
-            'allow_self_signed' => false,
-            'peer_name' => $host,
         ],
     ]);
-
-    $transport = $security === 'ssl' ? 'ssl://' : 'tcp://';
-    $socket = @stream_socket_client(
-        $transport . $host . ':' . $port,
-        $errorNumber,
-        $errorMessage,
-        20,
-        STREAM_CLIENT_CONNECT,
-        $context
-    );
-
-    if (!is_resource($socket)) {
-        throw new RuntimeException('Could not connect to SMTP server');
+    $body = @file_get_contents($url, false, $context);
+    $status = 0;
+    foreach ($http_response_header ?? [] as $line) {
+        if (preg_match('/^HTTP\/\S+\s+(\d{3})/', $line, $match)) $status = (int)$match[1];
     }
-
-    stream_set_timeout($socket, 20);
-
-    try {
-        smtpExpect($socket, [220]);
-        $hostname = preg_replace('/[^A-Za-z0-9.-]/', '', gethostname() ?: 'ocean-across.com');
-        smtpCommand($socket, 'EHLO ' . ($hostname ?: 'ocean-across.com'), [250]);
-
-        if ($security === 'tls') {
-            smtpCommand($socket, 'STARTTLS', [220]);
-            if (!stream_socket_enable_crypto($socket, true, STREAM_CRYPTO_METHOD_TLS_CLIENT)) {
-                throw new RuntimeException('Could not start encrypted SMTP connection');
-            }
-            smtpCommand($socket, 'EHLO ' . ($hostname ?: 'ocean-across.com'), [250]);
-        }
-
-        smtpCommand($socket, 'AUTH LOGIN', [334]);
-        smtpCommand($socket, base64_encode($username), [334]);
-        smtpCommand($socket, base64_encode($password), [235]);
-        smtpCommand($socket, 'MAIL FROM:<' . $fromEmail . '>', [250]);
-        smtpCommand($socket, 'RCPT TO:<' . $toEmail . '>', [250, 251]);
-        smtpCommand($socket, 'DATA', [354]);
-
-        $messageIdDomain = substr(strrchr($fromEmail, '@') ?: '@ocean-across.com', 1);
-        $headers = [
-            'Date: ' . date(DATE_RFC2822),
-            'From: ' . formatAddress($fromName, $fromEmail),
-            'To: ' . formatAddress($toName, $toEmail),
-            'Reply-To: ' . formatAddress($replyName, $replyEmail),
-            'Subject: ' . cleanHeader($subject, 180),
-            'Message-ID: <' . bin2hex(random_bytes(12)) . '@' . $messageIdDomain . '>',
-            'MIME-Version: 1.0',
-            'Content-Type: text/plain; charset=UTF-8',
-            'Content-Transfer-Encoding: 8bit',
-        ];
-
-        $message = implode("\r\n", $headers) . "\r\n\r\n";
-        $message .= str_replace(["\r\n", "\r"], "\n", $body);
-        $message = str_replace("\n", "\r\n", $message);
-        $message = preg_replace('/^\./m', '..', $message) ?? $message;
-
-        if (fwrite($socket, $message . "\r\n.\r\n") === false) {
-            throw new RuntimeException('Could not send email content');
-        }
-        smtpExpect($socket, [250]);
-        smtpCommand($socket, 'QUIT', [221]);
-    } finally {
-        fclose($socket);
-    }
+    if ($body === false) throw new RuntimeException('Brevo HTTPS connection failed');
+    return [$status, (string)$body];
 }
 
 // --------------------------------------------------------------------------
@@ -220,11 +131,9 @@ if ((int)($_SERVER['CONTENT_LENGTH'] ?? 0) > 32768) {
     exit('Form submission is too large');
 }
 
-$returnPath = safeReturnPath(cleanValue($_POST['return_to'] ?? '/', 500));
-
-// Honeypot: add a hidden field named website to every form. Humans leave it blank.
+// Honeypot. Bots fill this; real visitors do not.
 if (cleanValue($_POST['website'] ?? '', 300) !== '') {
-    finishRequest(true, $returnPath);
+    finishRequest(true);
 }
 
 $visitorName = cleanValue($_POST['name'] ?? $_POST['full_name'] ?? '', 120);
@@ -232,58 +141,64 @@ $visitorEmail = cleanValue($_POST['email'] ?? '', 254);
 $formName = cleanHeader(cleanValue($_POST['form_name'] ?? 'Website Enquiry', 100));
 
 if ($visitorName === '' || !filter_var($visitorEmail, FILTER_VALIDATE_EMAIL)) {
-    finishRequest(false, $returnPath);
+    finishRequest(false);
 }
 
 $ignoredFields = ['website', 'return_to', 'form_name', 'submit'];
-$lines = [
+$plainLines = [
     'A new Ocean Across website form has been submitted.',
     '',
     'Form: ' . $formName,
     'Submitted: ' . date('d M Y, H:i T'),
     '',
 ];
+$htmlRows = '';
 
 foreach ($_POST as $key => $value) {
     if (!is_string($key) || in_array($key, $ignoredFields, true)) continue;
     $label = displayLabel(substr($key, 0, 100));
     $clean = cleanValue($value);
-    $lines[] = $label . ': ' . ($clean !== '' ? $clean : '(not provided)');
-    $lines[] = '';
+    $displayValue = $clean !== '' ? $clean : '(not provided)';
+    $plainLines[] = $label . ': ' . $displayValue;
+    $plainLines[] = '';
+    $htmlRows .= '<tr><th style="padding:8px 12px;text-align:left;vertical-align:top;border-bottom:1px solid #e8e5dd">' .
+        htmlspecialchars($label, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') .
+        '</th><td style="padding:8px 12px;border-bottom:1px solid #e8e5dd">' .
+        nl2br(htmlspecialchars($displayValue, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')) . '</td></tr>';
 }
 
 $subject = '[Ocean Across] New ' . ($formName !== '' ? $formName : 'Website Enquiry');
-$body = implode("\n", $lines);
+$htmlContent = '<!doctype html><html><body style="font-family:Arial,sans-serif;color:#163c35">' .
+    '<h2>New Ocean Across website enquiry</h2><p><strong>Form:</strong> ' .
+    htmlspecialchars($formName, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</p>' .
+    '<table style="border-collapse:collapse;width:100%;max-width:720px">' . $htmlRows . '</table></body></html>';
 
 try {
+    if ($brevoApiKey === 'PASTE_BREVO_API_KEY_HERE' || trim($brevoApiKey) === '') {
+        throw new RuntimeException('Brevo API key has not been configured');
+    }
     foreach ([$fromEmail, $toEmail] as $configuredEmail) {
         if (!filter_var($configuredEmail, FILTER_VALIDATE_EMAIL)) {
             throw new RuntimeException('Invalid configured email address');
         }
     }
-    if ($smtpUsername === 'PASTE_SMTP_USERNAME_HERE' || $smtpPassword === 'PASTE_SMTP_PASSWORD_HERE') {
-        throw new RuntimeException('SMTP credentials have not been configured');
+
+    [$status, $responseBody] = sendBrevoRequest($brevoApiKey, [
+        'sender' => ['name' => $fromName, 'email' => $fromEmail],
+        'to' => [['name' => $toName, 'email' => $toEmail]],
+        'replyTo' => ['name' => $visitorName, 'email' => $visitorEmail],
+        'subject' => $subject,
+        'htmlContent' => $htmlContent,
+        'tags' => ['website-lead'],
+    ]);
+
+    if ($status < 200 || $status >= 300) {
+        throw new RuntimeException('Brevo API returned HTTP ' . $status . ': ' . substr($responseBody, 0, 500));
     }
 
-    sendUsingSmtp(
-        $smtpHost,
-        $smtpPort,
-        $smtpSecurity,
-        $smtpUsername,
-        $smtpPassword,
-        $fromEmail,
-        $fromName,
-        $toEmail,
-        $toName,
-        $visitorEmail,
-        $visitorName,
-        $subject,
-        $body
-    );
-    finishRequest(true, $returnPath);
+    finishRequest(true);
 } catch (Throwable $error) {
-    // The detailed error is written to Hostinger's PHP error log, never shown publicly.
     error_log('Ocean Across form email failed: ' . $error->getMessage());
-    finishRequest(false, $returnPath);
+    finishRequest(false);
 }
 
