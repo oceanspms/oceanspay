@@ -10,20 +10,6 @@ const finish = (status) => new Response(null, {
   headers: { Location: `/contact.html?lead=${status}#demo-form`, 'Cache-Control': 'no-store' },
 });
 
-function brevoFailureReason(status, data) {
-  const message = typeof data?.message === 'string' ? data.message : '';
-  if (/\bip(?: address)?\b/i.test(message) && /unauthori[sz]ed|unrecogni[sz]ed|not authori[sz]ed|not allowed|unknown|blocked|whitelist/i.test(message)) {
-    return 'source_ip_not_authorized';
-  }
-  if (/access denied for resource|permission|insufficient scope/i.test(message)) {
-    return 'insufficient_permissions';
-  }
-  if (/key not found|invalid (?:api[- ]?)?key|(?:api[- ]?)?key (?:is )?(?:invalid|expired|revoked|inactive|deactivated|missing|not active)|missing (?:api[- ]?)?key/i.test(message)) {
-    return 'api_key_rejected';
-  }
-  return status === 401 || status === 403 ? 'authorization_reason_unspecified' : 'request_rejected';
-}
-
 export default {
   async fetch(request) {
     if (request.method !== 'POST') {
@@ -47,9 +33,9 @@ export default {
         return finish('error');
       }
 
-      const key = process.env.BREVO_API_KEY?.trim();
+      const key = process.env.RESEND_API_KEY?.trim();
       if (!key) {
-        console.error('Demo form: BREVO_API_KEY is not configured');
+        console.error('Demo form: RESEND_API_KEY is not configured');
         return finish('error');
       }
 
@@ -58,34 +44,33 @@ export default {
         return `${label}: ${values.join(', ') || '(not provided)'}`;
       }).join('\n\n');
 
-      const result = await fetch('https://api.brevo.com/v3/smtp/email', {
+      const result = await fetch('https://api.resend.com/emails', {
         method: 'POST',
         redirect: 'error',
-        headers: { 'api-key': key, 'Content-Type': 'application/json', Accept: 'application/json' },
+        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Accept: 'application/json' },
         signal: AbortSignal.timeout(10000),
         body: JSON.stringify({
-          sender: { name: 'Ocean Across Website', email: 'info@oceanspay.co.uk' },
-          to: [{ name: 'Ocean Across', email: 'palkesh@oceanspay.co.uk' }],
-          replyTo: { name, email },
+          from: 'Oceans Pay Website <info@oceanspay.co.uk>',
+          to: ['palkesh@oceanspay.co.uk'],
+          reply_to: email,
           subject: '[Oceans Pay] New Book a Demo request',
-          textContent,
-          tags: ['website-lead'],
+          text: textContent,
         }),
       });
       if (!result.ok) {
         const data = await result.json().catch(() => null);
-        const code = typeof data?.code === 'string' && /^[a-z_]{1,64}$/i.test(data.code) ? data.code : 'unknown';
-        console.error('Demo form: Brevo rejected the request', result.status, code, brevoFailureReason(result.status, data));
+        const code = typeof data?.name === 'string' && /^[a-z_]{1,64}$/i.test(data.name) ? data.name : 'unknown';
+        console.error('Demo form: Resend rejected the request', result.status, code);
         return finish('error');
       }
       const data = await result.json();
-      if (typeof data?.messageId !== 'string' || !data.messageId) {
-        console.error('Demo form: Brevo did not return a message ID');
+      if (typeof data?.id !== 'string' || !data.id) {
+        console.error('Demo form: Resend did not return a message ID');
         return finish('error');
       }
       return finish('sent');
     } catch {
-      console.error('Demo form: could not process request or reach Brevo');
+      console.error('Demo form: could not process request or reach Resend');
       return finish('error');
     }
   },
