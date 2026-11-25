@@ -8,9 +8,9 @@ This repository is the Oceans Pay marketing site. Vercel serves the HTML and ass
 
 ## Book a Demo email setup
 
-In Vercel, open the `oceanspay` project and add `BREVO_API_KEY` under Settings → Environment Variables for Production. Enter the API key privately in Vercel and redeploy. Never commit API keys, place them in HTML, or put them into a public deployment artifact.
+In Vercel, open the `oceanspay` project and add `RESEND_API_KEY` under Settings → Environment Variables for Production. Enter the API key privately in Vercel and redeploy. Never commit API keys, place them in HTML, or put them into a public deployment artifact.
 
-The form uses Brevo’s transactional API. It sends from `info@oceanspay.co.uk` to `palkesh@oceanspay.co.uk`, with the visitor's email as Reply-To. Test the form and confirm both the on-page confirmation and inbox delivery. The old PHP endpoint is not used.
+Verify `oceanspay.co.uk` in Resend using the DNS records it provides, then create a Sending access API key restricted to that domain. Keep existing inbound mail records. The form uses Resend’s transactional API. It sends from `info@oceanspay.co.uk` to `palkesh@oceanspay.co.uk`, with the visitor's email as Reply-To. Test the form and confirm both the on-page confirmation and inbox delivery. The old PHP endpoint is not used.
 
 ## Included
 
@@ -20,7 +20,7 @@ The form uses Brevo’s transactional API. It sends from `info@oceanspay.co.uk` 
 - Oceans Pay product mark
 - Shared, page-specific, responsive and readability stylesheets
 - Mobile navigation and form-result JavaScript
-- Vercel server-side Brevo form handler
+- Vercel server-side Resend form handler
 
 ## Current temporary behaviour
 
