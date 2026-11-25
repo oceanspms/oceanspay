@@ -33,11 +33,8 @@
 })();
 
 (() => {
-  const form = document.querySelector('.bd-form[action="send-form.php"]');
+  const form = document.querySelector('.bd-form[action="/api/send-form"]');
   if (!form) return;
-
-  const returnTo = form.querySelector('input[name="return_to"]');
-  if (returnTo) returnTo.value = `${window.location.pathname}#demo-form`;
 
   const status = form.querySelector('[data-form-status]');
   const result = new URLSearchParams(window.location.search).get('lead');
