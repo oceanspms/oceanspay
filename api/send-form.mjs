@@ -51,7 +51,7 @@ export default {
         signal: AbortSignal.timeout(10000),
         body: JSON.stringify({
           from: 'Oceans Pay Website <info@oceanspay.co.uk>',
-          to: ['palkesh@oceanspay.co.uk'],
+          to: ['info@ocean-across.com'],
           reply_to: email,
           subject: '[Oceans Pay] New Book a Demo request',
           text: textContent,
