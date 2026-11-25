@@ -10,6 +10,20 @@ const finish = (status) => new Response(null, {
   headers: { Location: `/contact.html?lead=${status}#demo-form`, 'Cache-Control': 'no-store' },
 });
 
+function brevoFailureReason(status, data) {
+  const message = typeof data?.message === 'string' ? data.message : '';
+  if (/\bip(?: address)?\b/i.test(message) && /unauthori[sz]ed|unrecogni[sz]ed|not authori[sz]ed|not allowed|unknown|blocked|whitelist/i.test(message)) {
+    return 'source_ip_not_authorized';
+  }
+  if (/access denied for resource|permission|insufficient scope/i.test(message)) {
+    return 'insufficient_permissions';
+  }
+  if (/key not found|invalid (?:api[- ]?)?key|(?:api[- ]?)?key (?:is )?(?:invalid|expired|revoked|inactive|deactivated|missing|not active)|missing (?:api[- ]?)?key/i.test(message)) {
+    return 'api_key_rejected';
+  }
+  return status === 401 || status === 403 ? 'authorization_reason_unspecified' : 'request_rejected';
+}
+
 export default {
   async fetch(request) {
     if (request.method !== 'POST') {
@@ -61,7 +75,7 @@ export default {
       if (!result.ok) {
         const data = await result.json().catch(() => null);
         const code = typeof data?.code === 'string' && /^[a-z_]{1,64}$/i.test(data.code) ? data.code : 'unknown';
-        console.error('Demo form: Brevo rejected the request', result.status, code);
+        console.error('Demo form: Brevo rejected the request', result.status, code, brevoFailureReason(result.status, data));
         return finish('error');
       }
       const data = await result.json();
